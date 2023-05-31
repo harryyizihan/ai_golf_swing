@@ -1,4 +1,6 @@
 import argparse
+import os
+
 import cv2
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -11,11 +13,11 @@ import torch.nn.functional as F
 event_names = {
     0: 'Address',
     1: 'Toe-up',
-    2: 'Mid-backswing (arm parallel)',
+    2: 'Mid-backswing',
     3: 'Top',
-    4: 'Mid-downswing (arm parallel)',
+    4: 'Mid-downswing',
     5: 'Impact',
-    6: 'Mid-follow-through (shaft parallel)',
+    6: 'Mid-follow-through',
     7: 'Finish'
 }
 
@@ -59,18 +61,11 @@ class SampleVideo(Dataset):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--path', help='Path to video that you want to test', default='test_video.mp4')
+    parser.add_argument('-p', '--path', help='Path to video that you want to test', default='../amateur_golf_swing/123.mp4')
     parser.add_argument('-s', '--seq-length', type=int, help='Number of frames to use per forward pass', default=64)
+
     args = parser.parse_args()
     seq_length = args.seq_length
-
-    print('Preparing video: {}'.format(args.path))
-
-    ds = SampleVideo(args.path, transform=transforms.Compose([ToTensor(),
-                                Normalize([0.485, 0.456, 0.406],
-                                          [0.229, 0.224, 0.225])]))
-
-    dl = DataLoader(ds, batch_size=1, shuffle=False, drop_last=False)
 
     model = EventDetector(pretrain=True,
                           width_mult=1.,
@@ -91,38 +86,59 @@ if __name__ == '__main__':
     model.eval()
     print("Loaded model weights")
 
-    print('Testing...')
-    for sample in dl:
-        images = sample['images']
-        # full samples do not fit into GPU memory so evaluate sample in 'seq_length' batches
-        batch = 0
-        while batch * seq_length < images.shape[1]:
-            if (batch + 1) * seq_length > images.shape[1]:
-                image_batch = images[:, batch * seq_length:, :, :, :]
-            else:
-                image_batch = images[:, batch * seq_length:(batch + 1) * seq_length, :, :, :]
-            logits = model(image_batch.cpu())
-            if batch == 0:
-                probs = F.softmax(logits.data, dim=1).cpu().numpy()
-            else:
-                probs = np.append(probs, F.softmax(logits.data, dim=1).cpu().numpy(), 0)
-            batch += 1
+    path = '../pro_golf_swing_videos/'
 
-    events = np.argmax(probs, axis=0)[:-1]
-    print('Predicted event frames: {}'.format(events))
-    cap = cv2.VideoCapture(args.path)
+    for filename in os.listdir(path):
+        if filename.startswith('.'):
+            continue
 
-    confidence = []
-    for i, e in enumerate(events):
-        confidence.append(probs[e, i])
-    print('Condifence: {}'.format([np.round(c, 3) for c in confidence]))
+        print('Preparing video: {}'.format(filename))
 
-    for i, e in enumerate(events):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, e)
-        _, img = cap.read()
-        cv2.putText(img, '{:.3f}'.format(confidence[i]), (20, 20), cv2.FONT_HERSHEY_DUPLEX, 0.75, (0, 0, 255))
-        cv2.imshow(event_names[i], img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        ds = SampleVideo(path + filename, transform=transforms.Compose([ToTensor(),
+                                    Normalize([0.485, 0.456, 0.406],
+                                              [0.229, 0.224, 0.225])]))
+
+        dl = DataLoader(ds, batch_size=1, shuffle=False, drop_last=False)
+
+        print('Testing...')
+        for sample in dl:
+            images = sample['images']
+            # full samples do not fit into GPU memory so evaluate sample in 'seq_length' batches
+            batch = 0
+            while batch * seq_length < images.shape[1]:
+                if (batch + 1) * seq_length > images.shape[1]:
+                    image_batch = images[:, batch * seq_length:, :, :, :]
+                else:
+                    image_batch = images[:, batch * seq_length:(batch + 1) * seq_length, :, :, :]
+                logits = model(image_batch.cpu())
+                if batch == 0:
+                    probs = F.softmax(logits.data, dim=1).cpu().numpy()
+                else:
+                    probs = np.append(probs, F.softmax(logits.data, dim=1).cpu().numpy(), 0)
+                batch += 1
+
+        events = np.argmax(probs, axis=0)[:-1]
+        print('Predicted event frames: {}'.format(events))
+        cap = cv2.VideoCapture(path + filename)
+
+        confidence = []
+        for i, e in enumerate(events):
+            confidence.append(probs[e, i])
+        print('Condifence: {}'.format([np.round(c, 3) for c in confidence]))
+
+        original_image_name_prefix = filename.split('.')[0]
+
+        for i, e in enumerate(events):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, e)
+            _, img = cap.read()
+
+            new_img_name = 'pro_' + original_image_name_prefix + '_' + event_names[i] + '_' + str(round(confidence[i], 3)) + '.jpg'
+
+            cv2.imwrite('temp/' + new_img_name, img)
+
+            # cv2.putText(img, '{:.3f}'.format(confidence[i]), (20, 20), cv2.FONT_HERSHEY_DUPLEX, 0.75, (0, 0, 255))
+            # cv2.imshow(event_names[i], img)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
 
 

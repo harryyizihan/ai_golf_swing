@@ -1,214 +1,177 @@
 import torch
 import torch.nn as nn
+from torchvision import datasets, models, transforms
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.utils.data import sampler
+from torch.utils.data import Dataset, DataLoader
+import os
+from PIL import Image
+from torchvision import transforms
+from tqdm import tqdm
+from sklearn.metrics import accuracy_score, f1_score, recall_score
 
-import torchvision.datasets as dset
-import torchvision.transforms as T
+# Image transformations
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),  # Resize to 224x224 pixels
+    transforms.ToTensor(),  # Convert to PyTorch Tensor
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])  # Normalization
+])
 
-import numpy as np
+# Video dataset class: a single video dataset would consist 9 sequence of frames with highlighted skeleton points and
+# white/original background
+class VideoDataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.classes = sorted(os.listdir(root_dir))
+        self.videos = []
+        curr_vid_id = '0'
+        curr_vid_list = []
+        for c in self.classes:
+            # somehow it reads the Mac .DS_store file...
+            if c.startswith('.'):
+                continue
 
-USE_GPU = True
-dtype = torch.float32 # We will be using float throughout this tutorial.
+            pro_am, vid_id, swing_pos, confidence_score, _ = c.split('_')
 
-if USE_GPU and torch.cuda.is_available():
-    device = torch.device('cuda')
-else:
-    device = torch.device('cpu')
+            if vid_id == curr_vid_id:
+                curr_vid_list.append((vid_id, swing_pos, float(confidence_score), pro_am, os.path.join(root_dir, c)))
+            else:
+                if len(curr_vid_list) != 0:
+                    self.videos.append(list(curr_vid_list))
+                curr_vid_id = vid_id
+                curr_vid_list.clear()
+                curr_vid_list.append((vid_id, swing_pos, float(confidence_score), pro_am, os.path.join(root_dir, c)))
 
-# Constant to control how frequently we print train loss.
-print_every = 100
-print('using device:', device)
+        if len(curr_vid_list) != 0:
+            self.videos.append(list(curr_vid_list))
 
+    def __len__(self):
+        return len(self.videos)
 
+    def __getitem__(self, idx):
+        frames = []
+        for frame in self.videos[idx]:
+            vid_id, swing_position, confidence_score, pro_am, img_path = frame
+            img = Image.open(img_path)
+            if self.transform:
+                img = self.transform(img)
+            frames.append(img)
 
-NUM_TRAIN = 49000
-
-# The torchvision.transforms package provides tools for preprocessing data
-# and for performing data augmentation; here we set up a transform to
-# preprocess the data by subtracting the mean RGB value and dividing by the
-# standard deviation of each RGB value; we've hardcoded the mean and std.
-transform = T.Compose([
-                T.ToTensor(),
-                T.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-            ])
-
-# We set up a Dataset object for each split (train / val / test); Datasets load
-# training examples one at a time, so we wrap each Dataset in a DataLoader which
-# iterates through the Dataset and forms minibatches. We divide the CIFAR-10
-# training set into train and val sets by passing a Sampler object to the
-# DataLoader telling how it should sample from the underlying Dataset.
-videos_train = dset.CIFAR10('./golfdb-master/data/videos_160', train=True, download=True,
-                             transform=transform)
-loader_train = DataLoader(videos_train, batch_size=64, 
-                          sampler=sampler.SubsetRandomSampler(range(NUM_TRAIN)))
-
-videos_val = dset.CIFAR10('./golfdb-master/data/videos_160', train=True, download=True,
-                           transform=transform)
-loader_val = DataLoader(videos_val, batch_size=64, 
-                        sampler=sampler.SubsetRandomSampler(range(NUM_TRAIN, 50000)))
-
-videos_test = dset.CIFAR10('./golfdb-master/data/videos_160', train=False, download=True, 
-                            transform=transform)
-
-
-def flatten(x):
-    N = x.shape[0] # read in N, C, H, W
-    return x.view(N, -1)  # "flatten" the C * H * W values into a single vector per image
-
-# # Golf DB code
-
-# For each swing video, we first detect the 9 frames --> 9 pictures
-
-# see code in golfdb-master/test_video.py
-
-# # MMPose code
-
-# For every picture, use 3D pose estimation to pinpoint skeleton points 
-# (result can be a bunch of vector points), then we vstack them together
-
-model = init_model(
-    args.config,
-    args.checkpoint,
-    device=args.device,
-    cfg_options=cfg_options)
-
-# init visualizer
-model.cfg.visualizer.radius = args.radius
-model.cfg.visualizer.alpha = args.alpha
-model.cfg.visualizer.line_width = args.thickness
-
-visualizer = VISUALIZERS.build(model.cfg.visualizer)
-visualizer.set_dataset_meta(
-    model.dataset_meta, skeleton_style=args.skeleton_style)
-
-# inference a single 
-video_swing_position_skeleton_points = []
-for _ in range(9):
-    batch_results = inference_topdown(model, args.img)
-    frame_skeleton_points = merge_data_samples(batch_results)
-    video_swing_position_skeleton_points.append(frame_skeleton_points)
-    
-
-# Given all the 9 indices point, flatten and combine them sequentially order
-flatten_video_swing_position_points = flatten(video_swing_position_skeleton_points)
-
-# After flattening, so one video is one vector, vstack training example together
-
-# For label vector y, currently since we are all using professional player swing, 
-# the TODO item is to collect more amateur swing exmaples 
-# so we can balance out more dataset distribution
+        # Stack frames into one tensor
+        # TODO: figure out a way to encode swing_position & confidence score
+        video = torch.hstack(frames)
+        label = 1 if (pro_am == 'pro') else 0
+        return video, label
 
 
+# Define custom collate_fn to handle variable number of frames
+# def collate_fn(batch=16):
+#     videos = []
+#     labels = []
+#     for video, label in batch:
+#         videos.append(video)
+#         labels.append(label)
+#
+#     return torch.tensor(videos), torch.tensor(labels)
 
-# We need to wrap `flatten` function in a module in order to stack it
-class Flatten(nn.Module):
-    def forward(self, x):
-        return flatten(x)
-    
 
-def check_accuracy(loader, model):
-    if loader.dataset.train:
-        print('Checking accuracy on validation set')
-    else:
-        print('Checking accuracy on test set')   
-    num_correct = 0
-    num_samples = 0
-    model.eval()  # set model to evaluation mode
+# trial_root_dir = 'dataset/test_dataset'
+# currently using 3D skeleton points w/ white background as training examples
+positive_dir = 'dataset/pro_swing-position_skeleton_original-background_frames'
+negative_dir = 'dataset/amateur_swing-position_skeleton_white-background_frames'
+positive_dataset = VideoDataset(positive_dir, transform)
+negative_dataset = VideoDataset(negative_dir, transform)
+full_dataset = torch.utils.data.ConcatDataset([positive_dataset, negative_dataset])
+
+# Split the data into training and validation
+train_size = int(0.8 * len(full_dataset))
+val_size = len(full_dataset) - train_size
+train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+
+# Create dataloaders
+train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True)
+val_dataloader = DataLoader(val_dataset, batch_size=16, shuffle=True)
+
+# Load pre-trained model
+model = models.resnet50(pretrained=True)
+
+# Freeze the model parameters
+for param in model.parameters():
+    param.requires_grad = False
+
+# Replace the final layer for binary classification
+model.fc = nn.Linear(model.fc.in_features, 1)
+
+# Use GPU if available
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+
+# Loss function and optimizer
+criterion = nn.BCEWithLogitsLoss()
+optimizer = optim.Adam(model.fc.parameters(), lr=0.001)
+
+
+# Access batch
+# TODO: implement batch later
+# for batch in dataloader:
+#     videos, labels = batch
+#     # each item in 'videos' is a tensor with all frames of a single video
+
+best_dev_acc = 0.0
+
+# Train the model
+for epoch in range(10):  # for 10 epochs
+
+    # Train mode
+    model.train()
+    train_loss = 0.0
+    for inputs, labels in tqdm(train_dataloader, desc=f'train-{epoch}', disable=False):
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+
+        # Zero the parameter gradients
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(inputs)
+        loss = criterion(outputs.view(-1), labels.float())
+
+        # Backward pass and optimize
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+
+    print('Epoch: ', epoch, 'Training Loss: ', train_loss)
+    print('Finishing Training the model. Now starting to evaluate...')
+
+    # Validate the model
+    model.eval()  # Set the model to evaluation mode
+    y_true = []
+    y_pred = []
     with torch.no_grad():
-        for x, y in loader:
-            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
-            y = y.to(device=device, dtype=torch.long)
-            scores = model(x)
-            _, preds = scores.max(1)
-            num_correct += (preds == y).sum()
-            num_samples += preds.size(0)
-        acc = float(num_correct) / num_samples
-        print('Got %d / %d correct (%.2f)' % (num_correct, num_samples, 100 * acc))
+        for inputs, labels in tqdm(val_dataloader, desc=f'validation', disable=False):
+            inputs = inputs.to(device)
+            labels = labels.to(device)
 
+            outputs = model(inputs)
+            probs = torch.sigmoid(outputs)
+            preds = (probs > 0.5).int().squeeze()
+            y_true.extend(labels.tolist())
+            y_pred.extend(preds.tolist())
 
+    f1 = f1_score(y_true, y_pred, average='macro')
+    acc = accuracy_score(y_true, y_pred)
 
-def train(model, optimizer, epochs=1):
+    print('Dev Set Acc: ', acc)
+    print('Dev Set F1 score: ', f1)
 
-    model = model.to(device=device)  # move the model parameters to CPU/GPU
-    for e in range(epochs):
-        for t, (x, y) in enumerate(loader_train):
-            model.train()  # put model to training mode
-            x = x.to(device=device, dtype=dtype)  # move to device, e.g. GPU
-            y = y.to(device=device, dtype=torch.long)
+    if acc > best_dev_acc:
+        best_dev_acc = acc
+        # Save the trained model
+        torch.save(model.state_dict(), 'pro_am_classifier.pth')
 
-            scores = model(x)
-            loss = F.cross_entropy(scores, y)
+print('Overall Best Dev Acc: ', best_dev_acc)
 
-            # Zero out all of the gradients for the variables which the optimizer
-            # will update.
-            optimizer.zero_grad()
-
-            # This is the backwards pass: compute the gradient of the loss with
-            # respect to each  parameter of the model.
-            loss.backward()
-
-            # Actually update the parameters of the model using the gradients
-            # computed by the backwards pass.
-            optimizer.step()
-
-            if t % print_every == 0:
-                print('Iteration %d, loss = %.4f' % (t, loss.item()))
-                check_accuracy(loader_val, model)
-                print()
-
-
-
-
-model = None
-optimizer = None
-
-# *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
-
-out_1, out_2, out_3, out_4, num_classes = 16, 32, 64, 128, 10
-in_1, in_2, in_3, in_4 = 3, 16, 32, 64
-filter_1, filter_2, filter_3, filter_4 = 5, 3, 3, 3
-
-conv1 = nn.Sequential(
-    nn.Conv2d(in_1, out_1, filter_1, padding=2),
-    nn.BatchNorm2d(out_1),
-    nn.ReLU(),
-    nn.MaxPool2d(2)
-)
-
-conv2 = nn.Sequential(
-    nn.Conv2d(in_2, out_2, filter_2, padding=1),
-    nn.BatchNorm2d(out_2),
-    nn.ReLU(),
-    nn.MaxPool2d(2)
-)
-
-conv3 = nn.Sequential(
-    nn.Conv2d(in_3, out_3, filter_3, padding=1),
-    nn.BatchNorm2d(out_3),       
-    nn.ReLU(),                        
-    nn.MaxPool2d(2)                     
-)   
-
-conv4 = nn.Sequential(
-    nn.Conv2d(in_4, out_4, filter_4, padding=1),
-    nn.BatchNorm2d(out_4),     
-    nn.ReLU(),                        
-    nn.MaxPool2d(2)                     
-)    
-
-# Input: 4 x 4 x 64
-# move to fully connected layers
-fc =  nn.Sequential(
-    nn.Dropout(0.2, inplace=True),
-    nn.Linear(out_4 * 2 * 2, num_classes)
-)
-
-model = nn.Sequential(
-    conv1, conv2, conv3, conv4, Flatten(), fc
-)
-
-optimizer = optim.Adam(model.parameters(), lr=1e-3)
-
-train(model, optimizer, epochs=10)
+# TODO: implement test set

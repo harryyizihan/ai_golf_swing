@@ -6,6 +6,7 @@ from mmcv.image import imread
 from mmpose.apis import inference_topdown, init_model
 from mmpose.registry import VISUALIZERS
 from mmpose.structures import merge_data_samples
+import os
 
 
 def parse_args():
@@ -81,26 +82,33 @@ def main():
     visualizer.set_dataset_meta(
         model.dataset_meta, skeleton_style=args.skeleton_style)
 
-    # inference a single image
-    batch_results = inference_topdown(model, args.img)
-    results = merge_data_samples(batch_results)
+    path = 'demo/pro_swing_position_frames/'
+    for image in os.listdir(path):
+        if image.startswith('.'):
+            continue
 
-    # print ('result: ', results)
+        # inference a single image
+        batch_results = inference_topdown(model, path + image)
+        results = merge_data_samples(batch_results)
 
-    # show the results
-    img = imread('white_background.jpeg', channel_order='rgb')
-    visualizer.add_datasample(
-        'result',
-        img,
-        data_sample=results,
-        draw_gt=False,
-        draw_bbox=True,
-        kpt_thr=args.kpt_thr,
-        draw_heatmap=False,
-        show_kpt_idx=args.show_kpt_idx,
-        skeleton_style=args.skeleton_style,
-        show=args.show,
-        out_file=args.out_file)
+        # show the results
+        # img = imread(path + image, channel_order='rgb')
+        img = imread('white_background.jpeg', channel_order='rgb')
+        out_name = image.split('.')[0] + '.' + image.split('.')[1] + '_skeleton.jpg'
+        visualizer.add_datasample(
+            'result',
+            img,
+            data_sample=results,
+            draw_gt=False,
+            draw_bbox=True,
+            kpt_thr=args.kpt_thr,
+            draw_heatmap=False,
+            show_kpt_idx=args.show_kpt_idx,
+            skeleton_style=args.skeleton_style,
+            show=args.show,
+            out_file='demo/little_test/' + out_name)
+
+        print('Finished creating ' + out_name)
 
 
 if __name__ == '__main__':
