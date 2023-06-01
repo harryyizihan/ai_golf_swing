@@ -106,12 +106,12 @@ best_dev_acc = 0.0
 best_model = None
 
 # Train the model
-for epoch in range(10):  # for 10 epochs
+for epoch in range(1):  # for 10 epochs
 
     # Train mode
     model.train()
     train_loss = 0.0
-    for inputs, labels in tqdm(train_dataloader, desc=f'train-{epoch}', disable=False):
+    for inputs, labels in tqdm(val_dataloader, desc=f'train-{epoch}', disable=False):
         inputs = inputs.to(device)
         labels = labels.to(device)
 
@@ -146,7 +146,7 @@ for epoch in range(10):  # for 10 epochs
 
             outputs = model(inputs)
             probs = torch.sigmoid(outputs)
-            preds = (probs > threshold).int().squeeze()
+            preds = (probs > threshold).int().reshape(labels.shape)
             y_true.extend(labels.tolist())
             y_pred.extend(preds.tolist())
 
