@@ -86,7 +86,7 @@ if __name__ == '__main__':
     model.eval()
     print("Loaded model weights")
 
-    path = '../pro_golf_swing_videos/'
+    path = 'data/videos_160/'
 
     for filename in os.listdir(path):
         if filename.startswith('.'):
@@ -132,7 +132,7 @@ if __name__ == '__main__':
             cap.set(cv2.CAP_PROP_POS_FRAMES, e)
             _, img = cap.read()
 
-            new_img_name = 'pro_' + original_image_name_prefix + '_' + event_names[i] + '_' + str(round(confidence[i], 3)) + '.jpg'
+            new_img_name = 'amateur_' + original_image_name_prefix + '_' + event_names[i] + '_' + str(round(confidence[i], 3)) + '.jpg'
 
             cv2.imwrite('temp/' + new_img_name, img)
 

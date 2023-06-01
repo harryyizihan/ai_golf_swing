@@ -8,7 +8,8 @@ import os
 from PIL import Image
 from torchvision import transforms
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, f1_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, roc_curve, roc_auc_score
+import matplotlib.pyplot as plt
 
 # Image transformations
 transform = transforms.Compose([
@@ -64,37 +65,27 @@ class VideoDataset(Dataset):
         label = 1 if (pro_am == 'pro') else 0
         return video, label
 
-
-# Define custom collate_fn to handle variable number of frames
-# def collate_fn(batch=16):
-#     videos = []
-#     labels = []
-#     for video, label in batch:
-#         videos.append(video)
-#         labels.append(label)
-#
-#     return torch.tensor(videos), torch.tensor(labels)
-
-
-# trial_root_dir = 'dataset/test_dataset'
 # currently using 3D skeleton points w/ white background as training examples
-positive_dir = 'dataset/pro_swing-position_skeleton_original-background_frames'
-negative_dir = 'dataset/amateur_swing-position_skeleton_white-background_frames'
+positive_dir = '../ai_golf_swing_dataset/pro_swing-position_skeleton_white-background_frames'
+negative_dir = '../ai_golf_swing_dataset/amateur_swing-position_skeleton_white-background_frames'
 positive_dataset = VideoDataset(positive_dir, transform)
 negative_dataset = VideoDataset(negative_dir, transform)
 full_dataset = torch.utils.data.ConcatDataset([positive_dataset, negative_dataset])
 
 # Split the data into training and validation
-train_size = int(0.8 * len(full_dataset))
-val_size = len(full_dataset) - train_size
-train_dataset, val_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size])
+# 70% train, 10% dev, 20% test
+train_size = int(0.7 * len(full_dataset))
+val_size = int(0.1 * len(full_dataset))
+test_size = len(full_dataset) - train_size - val_size
+train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, val_size, test_size])
 
 # Create dataloaders
 train_dataloader = DataLoader(train_dataset, batch_size=16, shuffle=True)
 val_dataloader = DataLoader(val_dataset, batch_size=16, shuffle=True)
+test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=True)
 
 # Load pre-trained model
-model = models.resnet50(pretrained=True)
+model = models.resnet50(weights=True)
 
 # Freeze the model parameters
 for param in model.parameters():
@@ -111,14 +102,8 @@ model = model.to(device)
 criterion = nn.BCEWithLogitsLoss()
 optimizer = optim.Adam(model.fc.parameters(), lr=0.001)
 
-
-# Access batch
-# TODO: implement batch later
-# for batch in dataloader:
-#     videos, labels = batch
-#     # each item in 'videos' is a tensor with all frames of a single video
-
 best_dev_acc = 0.0
+best_model = None
 
 # Train the model
 for epoch in range(10):  # for 10 epochs
@@ -148,6 +133,10 @@ for epoch in range(10):  # for 10 epochs
 
     # Validate the model
     model.eval()  # Set the model to evaluation mode
+
+    # threshold probs for classifier to predict true
+    threshold = 0.5
+
     y_true = []
     y_pred = []
     with torch.no_grad():
@@ -157,21 +146,65 @@ for epoch in range(10):  # for 10 epochs
 
             outputs = model(inputs)
             probs = torch.sigmoid(outputs)
-            preds = (probs > 0.5).int().squeeze()
+            preds = (probs > threshold).int().squeeze()
             y_true.extend(labels.tolist())
             y_pred.extend(preds.tolist())
 
-    f1 = f1_score(y_true, y_pred, average='macro')
+    f1 = f1_score(y_true, y_pred, average='binary')
     acc = accuracy_score(y_true, y_pred)
 
     print('Dev Set Acc: ', acc)
     print('Dev Set F1 score: ', f1)
 
+    # calculate roc curves
+    fpr, tpr, thresholds = roc_curve(y_true, y_pred)
+
+    # plot the roc curve for the model
+    plt.plot([0, 1], [0, 1], linestyle='--', label='No Skill')
+    plt.plot(fpr, tpr, marker='.', label='Logistic')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.legend()
+    plt.show()
+
+    # compute AUC score
+    auc = roc_auc_score(y_true, y_pred)
+    print('AUC: %.3f' % auc)
+
     if acc > best_dev_acc:
         best_dev_acc = acc
-        # Save the trained model
-        torch.save(model.state_dict(), 'pro_am_classifier.pth')
+        best_model = 'pro_am_classifier_epoch_{}.pth'.format(epoch)
+        # Save the curr best model
+        torch.save(model.state_dict(), best_model)
 
 print('Overall Best Dev Acc: ', best_dev_acc)
 
-# TODO: implement test set
+# TODO: training loss vs. epoch curve
+
+# TODO: dev set acc vs. epoch
+
+# test set validation
+print('Starting to evaluate test set...')
+
+saved = torch.load(best_model)
+model.load_state_dict(saved['model'])
+model.to(device)
+model.eval()  # Set the model to evaluation mode
+
+# threshold probs for classifier to predict true
+threshold = 0.5
+
+y_true = []
+y_pred = []
+with torch.no_grad():
+    for inputs, labels in tqdm(test_dataloader, desc=f'test', disable=False):
+        inputs = inputs.to(device)
+        labels = labels.to(device)
+
+        outputs = model(inputs)
+        probs = torch.sigmoid(outputs)
+        preds = (probs > threshold).int().squeeze()
+        y_true.extend(labels.tolist())
+        y_pred.extend(preds.tolist())
+
+    print('Test set accuracy: ', accuracy_score(y_true, y_pred))

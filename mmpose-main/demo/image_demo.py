@@ -82,7 +82,7 @@ def main():
     visualizer.set_dataset_meta(
         model.dataset_meta, skeleton_style=args.skeleton_style)
 
-    path = 'demo/pro_swing_position_frames/'
+    path = 'demo/temp/'
     for image in os.listdir(path):
         if image.startswith('.'):
             continue
@@ -92,8 +92,8 @@ def main():
         results = merge_data_samples(batch_results)
 
         # show the results
-        # img = imread(path + image, channel_order='rgb')
-        img = imread('white_background.jpeg', channel_order='rgb')
+        img = imread(path + image, channel_order='rgb')
+        # img = imread('white_background.jpeg', channel_order='rgb')
         out_name = image.split('.')[0] + '.' + image.split('.')[1] + '_skeleton.jpg'
         visualizer.add_datasample(
             'result',

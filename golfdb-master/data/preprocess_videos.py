@@ -5,7 +5,7 @@ from multiprocessing import Pool
 import numpy as np
 
 df = pd.read_pickle('golfDB.pkl')
-yt_video_dir = '../../amateur_golf_swing/'
+yt_video_dir = '../../new_amateur_dataset/'
 
 
 def preprocess_videos(anno_id, dim=160):
@@ -15,11 +15,10 @@ def preprocess_videos(anno_id, dim=160):
 
     a = df.loc[df['id'] == anno_id]
     bbox = a['bbox'].values[0]
-    events = a['events'].values[0]
 
     path = 'videos_{}/'.format(dim)
 
-    number_name = 1
+    number_name = 475
     for filename in os.listdir(yt_video_dir):
         print('Processing annotation id {}'.format(number_name))
         real_file_path = yt_video_dir + filename
@@ -27,7 +26,7 @@ def preprocess_videos(anno_id, dim=160):
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(os.path.join(path, "{}.mp4".format(number_name)),
                               fourcc, cap.get(cv2.CAP_PROP_FPS), (dim, dim))
-        x = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * bbox[0]) + 200
+        x = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * bbox[0])
         y = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * bbox[1])
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * bbox[2])
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * bbox[3])
@@ -35,7 +34,6 @@ def preprocess_videos(anno_id, dim=160):
         success, image = cap.read()
         while success:
             count += 1
-            # if count >= events[0] and count <= events[-1]:
             crop_img = image[y:y + h, x:x + w]
             crop_size = crop_img.shape[:2]
             ratio = dim / max(crop_size)
