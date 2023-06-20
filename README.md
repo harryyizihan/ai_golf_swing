@@ -17,4 +17,4 @@ For downloading the pre-trained weights, click the link below:
 ## Poster
 ![](https://github.com/harryyizihan/ai_golf_swing/blob/main/CS_231N_Poster.png)
 
-For more technical details, please check * [Project Report](https://github.com/harryyizihan/ai_golf_swing/blob/main/Final_Project_Report.pdf)
+For more technical details, please check [Project Report](https://github.com/harryyizihan/ai_golf_swing/blob/main/Final_Project_Report.pdf).
